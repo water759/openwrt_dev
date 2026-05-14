@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>迷你路由器管理</title>
+  <style>
+    body { font-family: sans-serif; margin: 1rem; max-width: 900px; }
+    h1 { font-size: 1.4rem; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #eee; padding: .5rem; text-align: left; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    label { display:block; margin-top: .5rem; }
+    button { margin-top: .8rem; padding: .5rem .9rem; }
+    .ok { color: #0b8f2f; }
+    .err { color: #b20f0f; }
+    code { background:#f5f5f5; padding:2px 4px; }
+  </style>
+</head>
+<body>
+  <h1>OpenWrt 迷你管理网站</h1>
+
+  <div class="card">
+    <h2>实时流量</h2>
+    <p>每 2 秒刷新一次（单位 Bytes）。</p>
+    <table>
+      <thead><tr><th>接口</th><th>接收 (RX)</th><th>发送 (TX)</th></tr></thead>
+      <tbody id="trafficBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>防火墙配置</h2>
+    <div id="fwStatus"></div>
+    <form id="fwForm">
+      <div class="row">
+        <div>
+          <label>Input
+            <select name="input"><option>ACCEPT</option><option>REJECT</option><option>DROP</option></select>
+          </label>
+        </div>
+        <div>
+          <label>Output
+            <select name="output"><option>ACCEPT</option><option>REJECT</option><option>DROP</option></select>
+          </label>
+        </div>
+        <div>
+          <label>Forward
+            <select name="forward"><option>ACCEPT</option><option>REJECT</option><option>DROP</option></select>
+          </label>
+        </div>
+        <div>
+          <label>SYN Flood Protect
+            <select name="synflood_protect"><option value="1">1</option><option value="0">0</option></select>
+          </label>
+        </div>
+      </div>
+      <button type="submit">保存并应用</button>
+      <p id="saveResult"></p>
+    </form>
+  </div>
+
+<script>
+async function loadTraffic() {
+  try {
+    const res = await fetch('/cgi-bin/traffic.sh');
+    const data = await res.json();
+    const body = document.getElementById('trafficBody');
+    body.innerHTML = '';
+    (data.interfaces || []).forEach(i => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${i.name}</td><td>${i.rx_bytes}</td><td>${i.tx_bytes}</td>`;
+      body.appendChild(tr);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function loadFirewall() {
+  const res = await fetch('/cgi-bin/firewall.sh');
+  const data = await res.json();
+  const status = document.getElementById('fwStatus');
+  if (!data.ok) {
+    status.innerHTML = `<p class="err">读取失败: ${data.error || 'unknown'}</p>`;
+    return;
+  }
+  status.innerHTML = `<p>当前默认策略: <code>input=${data.defaults.input}</code>, <code>output=${data.defaults.output}</code>, <code>forward=${data.defaults.forward}</code>, <code>synflood_protect=${data.defaults.synflood_protect}</code></p>`;
+  const form = document.getElementById('fwForm');
+  form.input.value = data.defaults.input;
+  form.output.value = data.defaults.output;
+  form.forward.value = data.defaults.forward;
+  form.synflood_protect.value = data.defaults.synflood_protect;
+}
+
+document.getElementById('fwForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const payload = {
+    input: form.input.value,
+    output: form.output.value,
+    forward: form.forward.value,
+    synflood_protect: form.synflood_protect.value,
+  };
+
+  const resultEl = document.getElementById('saveResult');
+  try {
+    const res = await fetch('/cgi-bin/firewall.sh', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      resultEl.className = 'ok';
+      resultEl.textContent = '已保存并应用防火墙配置。';
+      loadFirewall();
+    } else {
+      resultEl.className = 'err';
+      resultEl.textContent = `保存失败: ${data.error || 'unknown'}`;
+    }
+  } catch (err) {
+    resultEl.className = 'err';
+    resultEl.textContent = `请求失败: ${err.message}`;
+  }
+});
+
+loadTraffic();
+loadFirewall();
+setInterval(loadTraffic, 2000);
+</script>
+</body>
+</html>
